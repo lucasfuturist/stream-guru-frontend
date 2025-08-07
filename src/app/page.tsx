@@ -1,103 +1,159 @@
-import Image from "next/image";
+// ADD THIS DIRECTIVE TO THE VERY TOP OF THE FILE
+"use client";
 
-export default function Home() {
+import React, { useState, useEffect, useCallback } from 'react';
+import type { Media, FilterCriteria } from '@/lib/api';
+// --- IMPORT THE NEW FUNCTION and remove the old one ---
+import { fetchTrending, fetchFuzzyFilteredResults, fetchFilteredMedia } from '@/lib/api';
+import SearchAndFilter from '@/components/SearchAndFilter';
+import MovieGrid from '@/components/MovieGrid';
+import MovieModal from '@/components/MovieModal';
+
+const PAGE_SIZE = 21;
+const SCROLL_THRESHOLD = 50; // Load more automatically until 50 movies are shown
+
+export default function HomePage() {
+  const [movies, setMovies] = useState<Media[]>([]);
+  const [heading, setHeading] = useState('Trending Now');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  
+  const [currentAction, setCurrentAction] = useState<'trending' | 'search' | 'filter'>('trending');
+  const [currentQuery, setCurrentQuery] = useState('');
+  const [currentFilters, setCurrentFilters] = useState<FilterCriteria>({});
+
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedMovieId, setSelectedMovieId] = useState<number | null>(null);
+
+  const loadMoreMovies = useCallback(async () => {
+    if (isLoadingMore || !hasMore) return;
+
+    setIsLoadingMore(true);
+    const nextPage = page + 1;
+
+    try {
+      let newMovies: Media[] = [];
+      if (currentAction === 'search') {
+        // --- USE THE NEW FUNCTION FOR PAGINATION ---
+        newMovies = await fetchFuzzyFilteredResults(currentQuery, currentFilters, nextPage);
+      } else if (currentAction === 'filter') {
+        newMovies = await fetchFilteredMedia(currentFilters, nextPage);
+      } else {
+        newMovies = await fetchTrending(nextPage);
+      }
+
+      if (newMovies.length > 0) {
+        setMovies(prev => [...prev, ...newMovies]);
+        setPage(nextPage);
+      }
+      
+      if (newMovies.length < PAGE_SIZE) {
+        setHasMore(false);
+      }
+    } catch (error) {
+      console.error("Failed to load more movies:", error);
+      setHasMore(false); // Stop trying if there's an error
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [page, hasMore, isLoadingMore, currentAction, currentQuery, currentFilters]);
+
+  // Effect for infinite scroll remains the same
+  useEffect(() => {
+    const handleScroll = () => {
+      if (isLoading || isLoadingMore || !hasMore || movies.length >= SCROLL_THRESHOLD) return;
+      if (window.innerHeight + document.documentElement.scrollTop >= document.documentElement.offsetHeight - 500) {
+        loadMoreMovies();
+      }
+    };
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [isLoading, isLoadingMore, hasMore, movies.length, loadMoreMovies]);
+
+  const startNewQuery = useCallback((action: 'trending' | 'search' | 'filter', loader: Promise<Media[]>) => {
+    setIsLoading(true);
+    setMovies([]);
+    setPage(1);
+    setHasMore(true);
+    setCurrentAction(action);
+    
+    loader.then(initialMovies => {
+      setMovies(initialMovies);
+      if (initialMovies.length < PAGE_SIZE) {
+        setHasMore(false);
+      }
+    }).catch(error => {
+      console.error(error);
+      setHasMore(false);
+    }).finally(() => {
+      setIsLoading(false);
+    });
+  }, []);
+
+  useEffect(() => {
+    setHeading('Trending Now');
+    startNewQuery('trending', fetchTrending(1));
+  }, [startNewQuery]);
+
+  // --- UPDATE handleSearch TO ACCEPT FILTERS ---
+  const handleSearch = (query: string, filters: FilterCriteria) => {
+    setHeading(`Results for "${query}"`);
+    setCurrentQuery(query);
+    setCurrentFilters(filters);
+    startNewQuery('search', fetchFuzzyFilteredResults(query, filters, 1));
+  };
+  
+  const handleFilter = (filters: FilterCriteria) => {
+    setHeading('Filtered Results');
+    // When filtering without a query, clear the query text
+    setCurrentQuery(''); 
+    setCurrentFilters(filters);
+    startNewQuery('filter', fetchFilteredMedia(filters, 1));
+  };
+  
+  const handleCardClick = (tmdbId: number) => {
+    setSelectedMovieId(tmdbId);
+    setIsModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+    setSelectedMovieId(null);
+  };
+
   return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+    <>
+      <SearchAndFilter onSearch={handleSearch} onFilter={handleFilter} />
+      <section>
+        <h2 className="mb-6 text-2xl font-bold text-navy">{heading}</h2>
+        {isLoading ? (
+          <p className="text-center text-text/70">Finding movies...</p>
+        ) : (
+          <>
+            <MovieGrid movies={movies} onCardClick={handleCardClick} />
+            {isLoadingMore && <p className="mt-4 text-center text-text/70">Loading more...</p>}
+            
+            {hasMore && !isLoadingMore && movies.length >= SCROLL_THRESHOLD && (
+              <div className="mt-8 text-center">
+                <button 
+                  onClick={loadMoreMovies} 
+                  className="rounded-lg bg-gold px-8 py-3 font-semibold text-navy transition-transform hover:scale-105"
+                >
+                  Load More
+                </button>
+              </div>
+            )}
+            
+            {!hasMore && movies.length > 0 && <p className="mt-8 text-center text-text/70">You've reached the end!</p>}
+          </>
+        )}
+      </section>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+      {isModalOpen && selectedMovieId && (
+        <MovieModal tmdbId={selectedMovieId} onClose={handleCloseModal} />
+      )}
+    </>
   );
 }
