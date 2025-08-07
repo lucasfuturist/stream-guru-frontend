@@ -1,5 +1,6 @@
 // src/components/MovieCard.tsx
 import React from 'react';
+import Image from 'next/image';
 import type { Media } from '@/lib/api';
 
 interface MovieCardProps {
@@ -7,25 +8,29 @@ interface MovieCardProps {
 }
 
 const MovieCard: React.FC<MovieCardProps> = ({ movie }) => {
+  const showScore = typeof movie.score === 'number' && movie.score > 0;
+
   return (
-    <div 
-      className="group relative cursor-pointer overflow-hidden rounded-lg shadow-lg transition-transform duration-200 hover:-translate-y-1"
-      data-tmdb-id={movie.tmdb_id}
-    >
-      {/* --- THIS IS THE FIX --- */}
-      {/* We now only render the score if it exists AND is greater than 0. */}
-      {/* This will hide the placeholder "0" from our trending fallback. */}
-      {movie.score && movie.score > 0 && (
-         <div className="absolute right-2 top-2 z-10 rounded-md bg-burgundy px-2 py-1 text-xs font-bold text-white">
-           {Math.round(movie.score * 100)}%
-         </div>
+    // --- THIS IS THE FIX ---
+    // We've added `relative` and `aspect-[2/3]` to this div.
+    // 'relative' is required for the child <Image> with `fill` to work.
+    // 'aspect-[2/3]' gives the container a defined shape (a standard movie poster ratio),
+    // which resolves the "height of 0" warning.
+    <div className="group relative aspect-[2/3] w-full cursor-pointer overflow-hidden rounded-lg shadow-lg transition-transform duration-200 hover:-translate-y-1">
+      {showScore && (
+        <div className="absolute right-2 top-2 z-10 rounded-md bg-burgundy px-2 py-1 text-xs font-bold text-white">
+          {Math.round(movie.score! * 100)}%
+        </div>
       )}
-      {/* --- END OF FIX --- */}
-      
-      <img
+      <Image
         src={movie.poster_path}
         alt={`Poster for ${movie.title}`}
-        className="block h-full w-full object-cover"
+        fill
+        sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 14vw"
+        className="object-cover"
+        // Add a placeholder to prevent layout shift while loading
+        placeholder="blur"
+        blurDataURL="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mN8+A8AAssB5CY77SMAAAAASUVORK5CYII="
       />
       <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
       <div className="absolute bottom-0 left-0 p-4">
